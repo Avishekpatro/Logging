@@ -36,3 +36,6 @@ build/
 
 ### Mac OS ###
 .DS_Store
+
+### Cursor AI metrics (local; safe to delete) ###
+.cursor/hooks/state/*.offset

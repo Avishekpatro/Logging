@@ -36,7 +36,15 @@ public final class Forwarder {
     private static final AttributeKey<String> ATTR_HOOK = AttributeKey.stringKey("hook");
     private static final AttributeKey<String> ATTR_LANGUAGE = AttributeKey.stringKey("language");
 
+    // Dummy lines for local testing (no runtime effect).
+    private static final int DUMMY_JAVA_SEED = 0;
+    private static final String DUMMY_JAVA_TAG = "dummy";
 
+    private static void dummyJavaNoOp() {
+        if (DUMMY_JAVA_SEED < 0 && DUMMY_JAVA_TAG.isEmpty()) {
+            throw new IllegalStateException("unreachable");
+        }
+    }
 
     private static String repoId() {
         Path cwd = Paths.get("").toAbsolutePath();

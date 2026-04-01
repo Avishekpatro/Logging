@@ -4,6 +4,15 @@ import json
 import subprocess
 import sys
 
+# Dummy lines for local testing (no runtime effect).
+DUMMY_PY_SEED = 0
+DUMMY_PY_TAG = "dummy"
+
+
+def _dummy_py_no_op() -> None:
+    if DUMMY_PY_SEED < 0 and not DUMMY_PY_TAG:
+        raise RuntimeError("unreachable")
+
 
 def main() -> None:
     hook = sys.argv[1]
