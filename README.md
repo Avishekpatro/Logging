@@ -58,13 +58,22 @@ mvn -f ai-metrics-forwarder-java/pom.xml -q exec:java -Dexec.args="--print --no-
 
 ### Commit-time efficiency (correlation)
 
-When you run **`git commit ...`** in the integrated terminal, Cursor’s `beforeShellExecution` hook runs **before** the commit and prints a banner plus:
+Efficiency compares **staged** file lines to AI events in `.cursor/hooks/state/ai_events.jsonl` and prints:
 
 `[cursor-ai][commit] generated_loc=… accepted_loc=… rejected_loc=… efficiency=…%`
 
-based on **staged** file contents vs AI events in `.cursor/hooks/state/ai_events.jsonl`. The hook runs `mvn compile exec:java --commit --no-otel` from the repo root so it still works after a clean build.
+**Reliable (recommended): Git `pre-commit` hook** — output always appears in the same terminal as `git commit`:
 
-To run the same summary manually:
+```bash
+git config core.hooksPath .githooks
+chmod +x .githooks/pre-commit
+```
+
+(One-time per clone; `core.hooksPath` is stored in this repo’s local `.git/config`.)
+
+**Optional:** Cursor’s `beforeShellExecution` hook (`.cursor/hooks.json`) may **not** print in the integrated terminal in some setups; the Git hook above does not depend on Cursor for visibility.
+
+Manual run (same logic):
 
 ```bash
 mvn -f ai-metrics-forwarder-java/pom.xml -q compile exec:java -Dexec.args="--commit --no-otel"

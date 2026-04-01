@@ -1,0 +1,17 @@
+#!/bin/sh
+# Runs before each commit; prints AI efficiency for the current staged snapshot.
+# Enable once per clone:  git config core.hooksPath .githooks
+#                          chmod +x .githooks/pre-commit
+set -eu
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT"
+
+echo "" >&2
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+echo "  Cursor AI — commit-time efficiency (staged snapshot)" >&2
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
+mvn -f ai-metrics-forwarder-java/pom.xml -q compile exec:java -Dexec.args="--commit --no-otel" 2>&1 || echo "[cursor-ai] Efficiency step failed (commit continues)." >&2
+echo "" >&2
+
+exit 0
