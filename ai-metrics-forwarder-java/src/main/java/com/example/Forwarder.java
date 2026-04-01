@@ -167,6 +167,14 @@ public final class Forwarder {
         return "unknown";
     }
 
+    // Dummy helper kept for local smoke tests / quick string sanity checks.
+    private static String dummyAgentTag(String agent) {
+        if (agent == null || agent.isBlank()) return "agent=unknown";
+        String trimmed = agent.trim();
+        if (trimmed.length() > 64) trimmed = trimmed.substring(0, 64);
+        return "agent=" + trimmed;
+    }
+
     private static long lineCount(String s) {
         if (s == null || s.isEmpty()) return 0;
         long count = 0;

@@ -6,6 +6,13 @@ import sys
 
 
 
+def _dummy_preview_label(agent: str) -> str:
+    """Dummy helper for local testing; safe to keep unused."""
+    if not isinstance(agent, str) or not agent.strip():
+        return "agent=unknown"
+    return f"agent={agent.strip()[:64]}"
+
+
 def main() -> None:
     hook = sys.argv[1]
     ts = sys.argv[2]
