@@ -58,10 +58,16 @@ mvn -f ai-metrics-forwarder-java/pom.xml -q exec:java -Dexec.args="--print --no-
 
 ### Commit-time efficiency (correlation)
 
-If this folder is a git repo, a `beforeShellExecution` hook will run on `git commit ...` and print a summary based on **staged files**:
+When you run **`git commit ...`** in the integrated terminal, Cursor’s `beforeShellExecution` hook runs **before** the commit and prints a banner plus:
+
+`[cursor-ai][commit] generated_loc=… accepted_loc=… rejected_loc=… efficiency=…%`
+
+based on **staged** file contents vs AI events in `.cursor/hooks/state/ai_events.jsonl`. The hook runs `mvn compile exec:java --commit --no-otel` from the repo root so it still works after a clean build.
+
+To run the same summary manually:
 
 ```bash
-mvn -f ai-metrics-forwarder-java/pom.xml -q exec:java -Dexec.args="--commit --no-otel"
+mvn -f ai-metrics-forwarder-java/pom.xml -q compile exec:java -Dexec.args="--commit --no-otel"
 ```
 
 ### View metrics
