@@ -7,11 +7,17 @@ import sys
 # Dummy lines for local testing (no runtime effect).
 DUMMY_PY_SEED = 0
 DUMMY_PY_TAG = "dummy"
+DUMMY_PY_MODE = "local-test"
+DUMMY_PY_FLAG = False
 
 
 def _dummy_py_no_op() -> None:
     if DUMMY_PY_SEED < 0 and not DUMMY_PY_TAG:
         raise RuntimeError("unreachable")
+
+
+def _dummy_py_label() -> str:
+    return f"{DUMMY_PY_TAG}:{DUMMY_PY_MODE}:{DUMMY_PY_FLAG}"
 
 
 def main() -> None:
