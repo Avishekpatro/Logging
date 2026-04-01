@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterTabFileEdit": [
+      {
+        "command": "sh .cursor/hooks/record_ai_edit.sh afterTabFileEdit"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "sh .cursor/hooks/record_ai_edit.sh afterFileEdit"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "sh .cursor/hooks/git_commit_summary.sh",
+        "matcher": "^git\\s+commit(\\s|$)"
+      }
+    ]
+  }
+}
+
