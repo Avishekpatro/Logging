@@ -36,17 +36,7 @@ public final class Forwarder {
     private static final AttributeKey<String> ATTR_HOOK = AttributeKey.stringKey("hook");
     private static final AttributeKey<String> ATTR_LANGUAGE = AttributeKey.stringKey("language");
 
-    // Dummy lines for local testing (no runtime effect).
-    private static final int DUMMY_JAVA_SEED = 0;
-    private static final String DUMMY_JAVA_TAG = "dummy";
-    private static final long DUMMY_JAVA_EXTRA = 2L;
-    private static final boolean DUMMY_JAVA_FLAG = false;
 
-    private static void dummyJavaNoOp() {
-        if (DUMMY_JAVA_SEED < 0 && DUMMY_JAVA_TAG.isEmpty()) {
-            throw new IllegalStateException("unreachable");
-        }
-    }
 
    
 
