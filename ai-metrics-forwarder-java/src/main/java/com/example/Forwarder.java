@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -282,6 +283,7 @@ public final class Forwarder {
 
         long generated = 0;
         long accepted = 0;
+        LinkedHashSet<String> agentsContributing = new LinkedHashSet<>();
 
         for (String line : chunk.split("\n")) {
             if (line.trim().isEmpty()) continue;
@@ -321,6 +323,10 @@ public final class Forwarder {
             Map<String, Integer> stagedMultiset = stagedLineCountsByFile.get(relPath);
             if (stagedMultiset == null) continue; // only correlate staged files
 
+            long generatedBeforeEvent = generated;
+            String agentStr = resolveCursorAgent(event, payload);
+            if (agentStr.length() > 128) agentStr = agentStr.substring(0, 128);
+
             for (JsonNode e : edits) {
                 String newStr;
                 if (payload == event) {
@@ -336,6 +342,9 @@ public final class Forwarder {
                     accepted += countAndConsume(stagedMultiset, genLine);
                 }
             }
+            if (generated > generatedBeforeEvent) {
+                agentsContributing.add(agentStr);
+            }
         }
 
         writeOffset(commitOffsetPath, newOffset);
@@ -347,12 +356,21 @@ public final class Forwarder {
 
         long rejected = Math.max(0, generated - accepted);
         double eff = 100.0 * accepted / (double) generated;
+        String agentField;
+        if (agentsContributing.isEmpty()) {
+            agentField = "";
+        } else if (agentsContributing.size() == 1) {
+            agentField = " agent=" + agentsContributing.iterator().next();
+        } else {
+            agentField = " agents=" + String.join(",", agentsContributing);
+        }
         System.err.println("");
         System.err.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         System.err.println("  Cursor AI — commit-time efficiency (staged snapshot)");
         System.err.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         System.out.println(
-                "[cursor-ai][commit] generated_loc=" + generated +
+                "[cursor-ai][commit]" + agentField +
+                        " generated_loc=" + generated +
                         " accepted_loc=" + accepted +
                         " rejected_loc=" + rejected +
                         " efficiency=" + String.format("%.2f", eff) + "%"
