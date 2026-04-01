@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.metrics.Meter;
@@ -35,10 +36,95 @@ public final class Forwarder {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final AttributeKey<String> ATTR_HOOK = AttributeKey.stringKey("hook");
     private static final AttributeKey<String> ATTR_LANGUAGE = AttributeKey.stringKey("language");
+    /** Cursor model / agent id (e.g. composer-2-fast), from hook payload. */
+    private static final AttributeKey<String> ATTR_AGENT = AttributeKey.stringKey("cursor.agent");
 
+    /**
+     * OpenTelemetry metrics for the live forwarder. With OTLP, created lazily on first Cursor AI edit
+     * so we do not run periodic exports when idle.
+     */
+    private static final class LiveOtel {
+        private final SdkMeterProvider meterProvider;
+        private final LongCounter aiGeneratedLoc;
+        private final LongCounter aiReplacedLoc;
+        private final LongUpDownCounter aiNetLoc;
+        private final LongCounter aiEditEvents;
 
+        private LiveOtel(
+                SdkMeterProvider meterProvider,
+                LongCounter aiGeneratedLoc,
+                LongCounter aiReplacedLoc,
+                LongUpDownCounter aiNetLoc,
+                LongCounter aiEditEvents) {
+            this.meterProvider = meterProvider;
+            this.aiGeneratedLoc = aiGeneratedLoc;
+            this.aiReplacedLoc = aiReplacedLoc;
+            this.aiNetLoc = aiNetLoc;
+            this.aiEditEvents = aiEditEvents;
+        }
 
-   
+        static LiveOtel createNoExport(Resource resource) {
+            SdkMeterProvider mp = SdkMeterProvider.builder().setResource(resource).build();
+            return buildMeters(mp);
+        }
+
+        static LiveOtel createWithOtlpExport(Resource resource) {
+            String endpointBase = System.getenv().getOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+                    .replaceAll("/+$", "");
+            MetricExporter exporter = OtlpHttpMetricExporter.builder()
+                    .setEndpoint(endpointBase + "/v1/metrics")
+                    .build();
+            SdkMeterProvider mp = SdkMeterProvider.builder()
+                    .setResource(resource)
+                    .registerMetricReader(
+                            PeriodicMetricReader.builder(exporter)
+                                    .setInterval(Duration.ofSeconds(1))
+                                    .build()
+                    )
+                    .build();
+            return buildMeters(mp);
+        }
+
+        private static LiveOtel buildMeters(SdkMeterProvider meterProvider) {
+            OpenTelemetrySdk otel = OpenTelemetrySdk.builder().setMeterProvider(meterProvider).build();
+            GlobalOpenTelemetry.set(otel);
+            Meter meter = otel.getMeter("cursor-hooks.ai-edits");
+            LongCounter aiGeneratedLoc = meter.counterBuilder("ai_generated_loc_total")
+                    .setDescription("Total LOC produced by Cursor AI file edits (new_string lines).")
+                    .setUnit("1")
+                    .build();
+            LongCounter aiReplacedLoc = meter.counterBuilder("ai_replaced_loc_total")
+                    .setDescription("Total LOC replaced/removed during Cursor AI edits (old_string lines).")
+                    .setUnit("1")
+                    .build();
+            LongUpDownCounter aiNetLoc = meter.upDownCounterBuilder("ai_net_loc_total")
+                    .setDescription("Net LOC change from Cursor AI edits (new - old).")
+                    .setUnit("1")
+                    .build();
+            LongCounter aiEditEvents = meter.counterBuilder("ai_edit_events_total")
+                    .setDescription("Count of Cursor AI edit events observed by hooks.")
+                    .setUnit("1")
+                    .build();
+            return new LiveOtel(meterProvider, aiGeneratedLoc, aiReplacedLoc, aiNetLoc, aiEditEvents);
+        }
+
+        void record(long totalOld, long totalNew, long totalNet, Attributes attrs) {
+            aiEditEvents.add(1, attrs);
+            if (totalNew != 0) {
+                aiGeneratedLoc.add(totalNew, attrs);
+            }
+            if (totalOld != 0) {
+                aiReplacedLoc.add(totalOld, attrs);
+            }
+            if (totalNet != 0) {
+                aiNetLoc.add(totalNet, attrs);
+            }
+        }
+
+        void shutdown() {
+            meterProvider.shutdown().join(5, TimeUnit.SECONDS);
+        }
+    }
 
     private static String repoId() {
         Path cwd = Paths.get("").toAbsolutePath();
@@ -51,6 +137,33 @@ public final class Forwarder {
         int idx = filePath.lastIndexOf('.');
         if (idx < 0 || idx == filePath.length() - 1) return "unknown";
         return filePath.substring(idx + 1).toLowerCase();
+    }
+
+    /** Model / agent name for OTLP (Cursor: usually {@code model} on hook payload; v1 events use {@code agent}). */
+    private static String resolveCursorAgent(JsonNode event, JsonNode payload) {
+        try {
+            if (payload != null && event == payload) {
+                if (event.has("agent") && !event.get("agent").isNull()) {
+                    String a = event.get("agent").asText("").trim();
+                    if (!a.isEmpty()) return a;
+                }
+            } else if (payload != null) {
+                if (payload.has("model") && !payload.get("model").isNull()) {
+                    String a = payload.get("model").asText("").trim();
+                    if (!a.isEmpty()) return a;
+                }
+                if (payload.has("agent") && !payload.get("agent").isNull()) {
+                    String a = payload.get("agent").asText("").trim();
+                    if (!a.isEmpty()) return a;
+                }
+                if (payload.has("cursor_model") && !payload.get("cursor_model").isNull()) {
+                    String a = payload.get("cursor_model").asText("").trim();
+                    if (!a.isEmpty()) return a;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return "unknown";
     }
 
     private static long lineCount(String s) {
@@ -144,7 +257,6 @@ public final class Forwarder {
 
     private static int commitCorrelateAndPrint(Path eventsPath) throws Exception {
         if (!isGitRepo()) {
-            System.out.println("[cursor-ai][commit] Not a git repository. Skipping commit-time correlation.");
             return 0;
         }
 
@@ -155,7 +267,6 @@ public final class Forwarder {
             if (!t.isEmpty()) stagedFiles.add(t);
         }
         if (stagedFiles.isEmpty()) {
-            System.out.println("[cursor-ai][commit] No staged files. Skipping.");
             return 0;
         }
 
@@ -189,6 +300,11 @@ public final class Forwarder {
 
             if (event.has("schema_version") && "ai-events/v1".equals(event.get("schema_version").asText())
                     && event.has("event_type") && "file_edit".equals(event.get("event_type").asText())) {
+                // Only measure Cursor-applied edits (other producers e.g. test scripts are ignored).
+                String producer = event.has("producer") ? event.get("producer").asText("") : "cursor";
+                if (!"cursor".equals(producer)) {
+                    continue;
+                }
                 payload = event;
                 edits = event.get("edits");
                 filePath = event.has("file_path") ? event.get("file_path").asText("") : "";
@@ -224,14 +340,24 @@ public final class Forwarder {
 
         writeOffset(commitOffsetPath, newOffset);
 
+        if (generated == 0) {
+            // No Cursor AI lines in this commit window — do not print efficiency.
+            return 0;
+        }
+
         long rejected = Math.max(0, generated - accepted);
-        double eff = generated == 0 ? 0.0 : (100.0 * accepted / (double) generated);
+        double eff = 100.0 * accepted / (double) generated;
+        System.err.println("");
+        System.err.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        System.err.println("  Cursor AI — commit-time efficiency (staged snapshot)");
+        System.err.println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         System.out.println(
                 "[cursor-ai][commit] generated_loc=" + generated +
                         " accepted_loc=" + accepted +
                         " rejected_loc=" + rejected +
                         " efficiency=" + String.format("%.2f", eff) + "%"
         );
+        System.err.println("");
         return 0;
     }
 
@@ -268,51 +394,8 @@ public final class Forwarder {
                 ))
         );
 
-        SdkMeterProvider meterProvider;
-        if (noOtel) {
-            meterProvider = SdkMeterProvider.builder().setResource(resource).build();
-        } else {
-            String endpointBase = System.getenv().getOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
-                    .replaceAll("/+$", "");
-
-            MetricExporter exporter = OtlpHttpMetricExporter.builder()
-                    .setEndpoint(endpointBase + "/v1/metrics")
-                    .build();
-
-            meterProvider = SdkMeterProvider.builder()
-                    .setResource(resource)
-                    .registerMetricReader(
-                            PeriodicMetricReader.builder(exporter)
-                                    .setInterval(Duration.ofSeconds(1))
-                                    .build()
-                    )
-                    .build();
-        }
-
-        OpenTelemetrySdk otel = OpenTelemetrySdk.builder().setMeterProvider(meterProvider).build();
-        GlobalOpenTelemetry.set(otel);
-
-        Meter meter = otel.getMeter("cursor-hooks.ai-edits");
-
-        LongCounter aiGeneratedLoc = meter.counterBuilder("ai_generated_loc_total")
-                .setDescription("Total LOC produced by Cursor AI file edits (new_string lines).")
-                .setUnit("1")
-                .build();
-
-        LongCounter aiReplacedLoc = meter.counterBuilder("ai_replaced_loc_total")
-                .setDescription("Total LOC replaced/removed during Cursor AI edits (old_string lines).")
-                .setUnit("1")
-                .build();
-
-        LongUpDownCounter aiNetLoc = meter.upDownCounterBuilder("ai_net_loc_total")
-                .setDescription("Net LOC change from Cursor AI edits (new - old).")
-                .setUnit("1")
-                .build();
-
-        LongCounter aiEditEvents = meter.counterBuilder("ai_edit_events_total")
-                .setDescription("Count of Cursor AI edit events observed by hooks.")
-                .setUnit("1")
-                .build();
+        // --no-otel: in-process metrics only (no export). Otherwise: lazy OTLP — no export until first Cursor AI edit.
+        LiveOtel liveOtel = noOtel ? LiveOtel.createNoExport(resource) : null;
 
         long offset = readOffset(offsetPath);
         long totalGeneratedAll = 0;
@@ -343,6 +426,10 @@ public final class Forwarder {
 
                     if (event.has("schema_version") && "ai-events/v1".equals(event.get("schema_version").asText())
                             && event.has("event_type") && "file_edit".equals(event.get("event_type").asText())) {
+                        String producer = event.has("producer") ? event.get("producer").asText("") : "cursor";
+                        if (!"cursor".equals(producer)) {
+                            continue;
+                        }
                         payload = event;
                         edits = event.get("edits");
                         filePath = event.has("file_path") ? event.get("file_path").asText("") : "";
@@ -383,15 +470,21 @@ public final class Forwarder {
                     String language = guessLanguage(filePath);
                     if (language.length() > 128) language = language.substring(0, 128);
 
-                    Attributes attrs = Attributes.of(
-                            ATTR_HOOK, hook,
-                            ATTR_LANGUAGE, language
-                    );
+                    String agent = resolveCursorAgent(event, payload);
+                    if (agent.length() > 128) agent = agent.substring(0, 128);
 
-                    aiEditEvents.add(1, attrs);
-                    if (totalNew != 0) aiGeneratedLoc.add(totalNew, attrs);
-                    if (totalOld != 0) aiReplacedLoc.add(totalOld, attrs);
-                    if (totalNet != 0) aiNetLoc.add(totalNet, attrs);
+                    AttributesBuilder ab = Attributes.builder();
+                    ab.put(ATTR_HOOK, hook);
+                    ab.put(ATTR_LANGUAGE, language);
+                    ab.put(ATTR_AGENT, agent);
+                    Attributes attrs = ab.build();
+
+                    if (noOtel) {
+                        liveOtel.record(totalOld, totalNew, totalNet, attrs);
+                    } else {
+                        LiveOtel ot = liveOtel != null ? liveOtel : (liveOtel = LiveOtel.createWithOtlpExport(resource));
+                        ot.record(totalOld, totalNew, totalNet, attrs);
+                    }
 
                     // Console stats (local testing)
                     // NOTE: Cursor hooks record AI edits, not subsequent human edits.
@@ -404,6 +497,7 @@ public final class Forwarder {
                         double eff = totalGeneratedAll == 0 ? 0.0 : (100.0 * totalAcceptedProxyAll / (double) totalGeneratedAll);
                         System.out.println(
                                 "[cursor-ai] hook=" + hook +
+                                        " agent=" + agent +
                                         " lang=" + language +
                                         " generated_loc=" + totalNew +
                                         " accepted_loc_proxy=" + acceptedProxy +
@@ -419,7 +513,9 @@ public final class Forwarder {
             TimeUnit.SECONDS.sleep(1);
         }
 
-        meterProvider.shutdown().join(5, TimeUnit.SECONDS);
+        if (liveOtel != null) {
+            liveOtel.shutdown();
+        }
     }
 }
 

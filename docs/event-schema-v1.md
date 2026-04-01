@@ -32,6 +32,7 @@ Minimal required fields:
 Optional fields:
 
 - `hook`: producer-specific hook/action name (e.g. `"afterTabFileEdit"`)
+- `agent`: Cursor model / agent id when known (e.g. `"composer-2-fast"`); copied from hook payload `model` / `agent` / `cursor_model`
 - `repo_root`: absolute repo root (if known)
 - `session_id`, `suggestion_id`: stable IDs if the producer can provide them
 

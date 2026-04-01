@@ -30,9 +30,21 @@ def main() -> None:
     root = repo_root()
     file_path = ""
     edits_in = []
+    agent = ""
     if isinstance(payload_obj, dict):
         file_path = payload_obj.get("file_path") or ""
         edits_in = payload_obj.get("edits") or []
+        # Cursor sends model name (e.g. composer-2-fast, default); keep optional fallbacks.
+        agent = (
+            payload_obj.get("model")
+            or payload_obj.get("agent")
+            or payload_obj.get("cursor_model")
+            or ""
+        )
+        if isinstance(agent, str):
+            agent = agent.strip()
+        else:
+            agent = str(agent).strip() if agent is not None else ""
 
     def to_rel(p: str) -> str:
         if not isinstance(p, str):
@@ -71,6 +83,7 @@ def main() -> None:
         "hook": hook,
         "repo_root": root or None,
         "file_path": to_rel(file_path),
+        "agent": agent or None,
         "edits": edits_out,
     }
     with open(out_path, "a", encoding="utf-8") as f:

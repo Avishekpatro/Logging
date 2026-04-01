@@ -9,7 +9,7 @@ This project includes Cursor Hooks that record standardized **AI edit events** w
 
 Events are written to `.cursor/hooks/state/ai_events.jsonl`.
 
-Metrics are exported via **OTLP/HTTP** by the Java forwarder.
+Metrics are exported via **OTLP/HTTP** by the Java forwarder **only after the first Cursor AI edit** in that process (no periodic export while idle). Use `--no-otel` to disable export entirely.
 
 ### Event schema (stable contract)
 
@@ -58,7 +58,9 @@ mvn -f ai-metrics-forwarder-java/pom.xml -q exec:java -Dexec.args="--print --no-
 
 ### Commit-time efficiency (correlation)
 
-Efficiency compares **staged** file lines to AI events in `.cursor/hooks/state/ai_events.jsonl` and prints:
+Efficiency compares **staged** file lines to **Cursor** AI events in `.cursor/hooks/state/ai_events.jsonl` (`ai-events/v1` with `producer: "cursor"`). If there are **no** such lines in the commit window (`generated_loc=0`), **nothing is printed** (no banner, no efficiency line).
+
+When there is something to measure, it prints a short banner and:
 
 `[cursor-ai][commit] generated_loc=… accepted_loc=… rejected_loc=… efficiency=…%`
 

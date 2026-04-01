@@ -1,6 +1,6 @@
 #!/bin/sh
 # Cursor hook: beforeShellExecution (matcher: git commit ...)
-# Prints commit-time AI efficiency for staged files, then allows the commit to proceed.
+# Runs same commit-time efficiency as .githooks/pre-commit (output only if Cursor AI edits exist).
 set -eu
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -19,15 +19,8 @@ except Exception:
 
 case "$command" in
   git\ commit* )
-    echo "" >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-    echo "  Cursor AI — commit-time efficiency (staged snapshot)" >&2
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-    # compile + run so it works even if ai-metrics-forwarder-java/target was cleaned
-    if ! mvn -f ai-metrics-forwarder-java/pom.xml -q compile exec:java -Dexec.args="--commit --no-otel"; then
-      echo "[cursor-ai] Efficiency step failed (commit still allowed)." >&2
-    fi
-    echo "" >&2
+    mvn -f ai-metrics-forwarder-java/pom.xml -q compile exec:java -Dexec.args="--commit --no-otel" 2>&1 \
+      || echo "[cursor-ai] Efficiency step failed (commit still allowed)." >&2
     ;;
 esac
 
